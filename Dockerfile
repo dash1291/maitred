@@ -3,7 +3,7 @@ FROM node:22-slim
 
 # tiny init for clean signal handling (SIGTERM -> node)
 # tini: clean SIGTERM; curl+python3: the recon agent's read-only crawl tools
-RUN apt-get update && apt-get install -y --no-install-recommends tini curl python3 ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends tini curl jq python3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /maitred

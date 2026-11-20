@@ -13,6 +13,15 @@ RULES (hard):
 - Your FINAL message must end with exactly one fenced json block containing the Recipe. No prose after the block.
 - Work only inside the current working directory (your scratch). Save downloaded pages/bundles there; write the draft to recipe-draft.json, but the final message is the deliverable.
 - Timebox: recon, not an ego project. The DELIVERABLE is the recipe JSON, not a complete platform reverse-engineer. Hard priority order: (1) platform fingerprint, (2) verified ids via read-only endpoints, (3) slot-config probe endpoint, (4) auth flags (otp/captcha/payment) at a glance. Once you have those four, STOP INVESTIGATING AND EMIT THE RECIPE. Exact booking-POST payload shapes are phase-3 work — one sentence in booking.notes about where to look is enough. If you cannot find the booking stack within ~20 tool calls, emit the recipe anyway with booking.notes "recon-incomplete" and what you did learn. Never fabricate.
+- Dead-end discipline: a platform stub with zero outlets, an empty config, or a
+  404/500 at the direct guess is NOT a finding — it's a signal to look
+  somewhere else (the restaurant's OWN website is the next stop; most chains
+  have a Reserve button there, often to a different reservation platform
+  entirely). Do not conclude from an empty answer. If a site or search blocks
+  one approach (bot page, 403), vary it: different UA, the API instead of the
+  HTML, a search engine, or another entry page. Exhaust at least the
+  restaurant's own site + a working booking page before writing "no online
+  bookings".
 
 RECIPE SCHEMA (v1) — emit STRICT JSON: no comments, no trailing commas, every
 field below present. Field rules follow the example.
