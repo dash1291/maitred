@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createModels } from "@earendil-works/pi-ai/models";
+import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { AirMenusWatch } from "./tasks/watch.ts";
@@ -34,10 +35,14 @@ export async function bootstrap(): Promise<MaitredHarness> {
     }),
   );
 
-  // The watch tier needs no model at all. Phase 2 (discovery) replaces this
-  // empty catalog with a real provider (Anthropic, reads ANTHROPIC_API_KEY):
-  // watch tasks never call generate, so an empty Models passes type+runtime.
+  // Watch tier: pure code, no model needed. Discovery tier (phase 2): uses
+  // Claude via ANTHROPIC_API_KEY from the environment. If the key is absent
+  // the daemon still boots and watches fine; discovery requests just fail
+  // at run time with a clear error.
   const models = createModels();
+  if (process.env.ANTHROPIC_API_KEY) {
+    models.setProvider(anthropicProvider());
+  }
 
   const storage = await openNodeSqliteStorage(
     path.join(STATE_DIR, "maitred.sqlite"),

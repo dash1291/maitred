@@ -24,6 +24,16 @@ async function main() {
   const m = await bootstrap();
   console.log(`[maitred] harness open, resume()d`);
 
+  // Production mode: headless. The daemon owns nothing and creates nothing —
+  // it only resumes durable tasks from SQLite (watch tasks survive restarts
+  // by design) and waits. New watches arrive via the Telegram bridge / CLI.
+  // Used by the Docker container.
+  if (command === "daemon") {
+    console.log(`[maitred] daemon mode: resuming durable tasks, waiting`);
+    await daemon(m);
+    return;
+  }
+
   if (command === "watch") {
     const restaurant = args[1] ?? "guerilladiner";
     const rest = await fetchRestaurant(restaurant);
@@ -44,6 +54,21 @@ async function main() {
 
     void watchTaskGraph(m, Number(id));
   }
+}
+
+// Block "forever": pi-durable holds no thread for sleeping tasks; without
+// this the process would see an empty runloop and exit.
+function daemon(m: Awaited<ReturnType<typeof bootstrap>>) {
+  return new Promise<never>((_, reject) => {
+    process.on("SIGTERM", () => {
+      console.log(`[maitred] SIGTERM: exiting (durable state is already committed)`);
+      process.exit(0);
+    });
+    process.on("uncaughtException", reject);
+    setInterval(() => {
+      // keep the run loop alive
+    }, 1 << 30);
+  });
 }
 
 main().catch((e) => {
