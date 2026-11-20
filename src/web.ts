@@ -29,6 +29,8 @@ function loadToken(): string {
 }
 
 const m = await bootstrap();
+const bootToken = loadToken(); // eagerly create state/webtoken on boot
+void bootToken;
 
 // One live value of the task graph (used for state polls; cheap).
 interface GraphTask {
