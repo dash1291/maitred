@@ -9,6 +9,8 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { bootstrap, startWatch } from "./harness.ts";
 import { fetchRestaurant } from "./connectors/airmenus.ts";
+import { startFromMessage, confirmRecipe } from "./request.ts";
+import { loadRecipe, listRecipeNames } from "./recipes.ts";
 import { Requests } from "./docs.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { TaskId } from "@earendil-works/pi-durable";
@@ -98,7 +100,35 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/state" && req.method === "GET") {
       const requests = await m.harness.snapshot(Requests, context);
       const alive = await graphOnce();
-      return void json({ requests: requests ?? {}, alive, status: "ok", pollSeconds: 4 });
+      const recipes = await listRecipeNames();
+      return void json({ requests: requests ?? {}, alive, recipes, status: "ok", pollSeconds: 4 });
+    }
+
+    if (url.pathname === "/api/message" && req.method === "POST") {
+      const body = JSON.parse(await readBody(req)) as { text?: string };
+      if (!body.text?.trim()) return void json({ error: "text required" }, 400);
+      const result = await startFromMessage(m, body.text);
+      return void json(result, result.route === "rejected" ? 400 : 200);
+    }
+
+    if (url.pathname === "/api/confirm" && req.method === "POST") {
+      const body = JSON.parse(await readBody(req)) as { requestId?: string; approve?: boolean };
+      if (!body.requestId || typeof body.approve !== "boolean") {
+        return void json({ error: "requestId and approve required" }, 400);
+      }
+      const result = await confirmRecipe(m, body.requestId, body.approve);
+      return void json({ result }, result === "delivered" ? 200 : 400);
+    }
+
+    if (url.pathname === "/api/recipes" && req.method === "GET") {
+      const names = await listRecipeNames();
+      const recipes = await Promise.all(
+        names.map(async (n) => {
+          const r = await loadRecipe(n);
+          return r ? { name: r.name, platform: r.restaurant.platformId } : null;
+        }),
+      );
+      return void json({ recipes: recipes.filter((r) => r !== null) });
     }
 
     if (url.pathname === "/api/watch" && req.method === "POST") {
