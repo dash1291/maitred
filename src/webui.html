@@ -1,0 +1,99 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>maitred</title>
+<style>
+  body{font:14px -apple-system,Sans-Serif;background:#0d1117;color:#e6edf3;max-width:760px;margin:2rem auto;padding:0 1rem}
+  h1{font-size:1.4rem} h2{font-size:1.05rem;margin-top:2rem}
+  .card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:1rem;margin:.6rem 0}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px}
+  .watching{background:#1f6feb33;color:#79b8ff} .confirming{background:#28a74533;color:#7ee787}
+  .failed,.cancelled{background:#d73a4933;color:#ff7b72} .booked{background:#8250df33;color:#d2a8ff}
+  .accepted,.discovering{background:#d2992233;color:#e3b341}
+  .note{color:#7d8590;font-size:12px;margin-top:.4rem}
+  form{display:flex;gap:.5rem;flex-wrap:wrap}
+  input,select,button{background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:6px;padding:6px 10px;font:inherit}
+  select option{background:#161b22}
+  button{cursor:pointer} button:hover{border-color:#8b949e}
+  button.danger{border-color:#d73a4922;color:#ff7b72}
+</style></head><body>
+<h1>maître-d</h1>
+<div id="root"><div class="card">loading…</div></div>
+
+<h2>start a watch</h2>
+<div class="card">
+<form id="f">
+  <select id="recipe"><option value="guerilladiner">Guerilla Diner (AirMenus)</option></select>
+  <input id="dates" placeholder="2026-11-28,2026-11-29" size="24" required>
+  <input id="times" placeholder="19:00,20:00" size="14" required>
+  <input id="pax" placeholder="pax: 4" size="5" required>
+  <button>watch</button>
+</form>
+<div class="note">watch = poll the outlet every ~4s until any listed date/time opens, then hold for confirmation.</div>
+</div>
+
+<h2>server</h2>
+<div class="card"><div id="srv" class="note">…</div></div>
+
+<script>
+const TOKEN = window.__MAITRED_TOKEN__;
+async function api(path, opts) {
+  const r = await fetch(path, Object.assign({ headers: { "x-maitred-token": TOKEN } }, opts));
+  if (!r.ok) throw new Error((await r.text()) || r.status);
+  return r.json();
+}
+// s.alive maps taskId -> 1 (live) or 2 (terminal)
+async function refresh() {
+  try {
+    const s = await api("/api/state");
+    const root = document.getElementById("root");
+    const reqs = Object.entries(s.requests || {});
+    document.getElementById("srv").textContent =
+      "harness: open · " + Object.keys(s.tasks || {}).length + " task(s) live · source: sqlite (durable, crash-resumable)";
+    if (reqs.length === 0) {
+      root.innerHTML = '<div class="card">no requests yet.</div>';
+      return;
+    }
+    root.innerHTML = reqs.map(function (pair) {
+      const id = pair[0], r = pair[1];
+      const liveState = s.alive && s.alive[r.taskId];
+      const active = live && (live.state.status === "running" || live.state.status === "sleeping" || live.state.status === "waiting");
+      const stateLine = live ? " · task" + r.taskId + " " + live.state.status : "";
+      return '<div class="card">' +
+        '<b>' + r.restaurant + '</b> · ' + r.pax + ' pax · ' + r.dates.join(", ") +
+        ' @ ' + (r.times.join("/") || 'any time') +
+        '  <span class="pill ' + r.status + '">' + r.status + '</span>' +
+        '<div class="note">' + (r.statusNote || "") + '</div>' +
+        '<div class="note">watching since ' + new Date(r.createdAt).toLocaleString() + stateLine + '</div>' +
+        (active
+          ? '<form onsubmit="cancelReq(event, \'' + id + '\')" style="margin-top:.5rem"><button class="danger">cancel watch</button></form>'
+          : '') +
+        '</div>';
+    }).join("");
+  } catch (e) {
+    document.getElementById("srv").textContent = "err: " + e.message;
+  }
+}
+async function cancelReq(ev, id) {
+  ev.preventDefault();
+  await api("/api/cancel", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) });
+  refresh();
+}
+document.getElementById("f").addEventListener("submit", async function (ev) {
+  ev.preventDefault();
+  const body = {
+    recipe: document.getElementById("recipe").value,
+    dates: document.getElementById("dates").value.split(",").map(s => s.trim()).filter(Boolean),
+    times: document.getElementById("times").value.split(",").map(s => s.trim()).filter(Boolean),
+    pax: Number(document.getElementById("pax").value),
+  };
+  try {
+    await api("/api/watch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    document.getElementById("f").reset();
+    refresh();
+  } catch (e) {
+    document.getElementById("srv").textContent = "err: " + e.message;
+  }
+});
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body></html>

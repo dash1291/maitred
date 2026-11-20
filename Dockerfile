@@ -22,4 +22,5 @@ VOLUME /maitred/state
 EXPOSE 0
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "--experimental-strip-types", "src/main.ts", "daemon"]
+# web console = daemon + console in one process (bootstrap+resume inside web.ts)
+CMD ["node", "--experimental-strip-types", "src/web.ts"]

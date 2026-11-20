@@ -10,8 +10,9 @@ services:
       - .env
     volumes:
       - ./state:/maitred/state
-    # outbound-only: no ports published, nothing reachable from outside
-    # deploy management via `ssh dev@... docker compose ...`
+    # console on host loopback ONLY — reach it via ssh -L, never from the net
+    ports:
+      - "127.0.0.1:8681:8681"
     logging:
       driver: json-file
       options:

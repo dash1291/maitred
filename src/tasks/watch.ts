@@ -114,12 +114,16 @@ export const AirMenusWatch = defineTask<WatchInput, WatchCheckpoint, WatchResult
             };
           }
           if (runtime.now() >= input.giveUpAt) {
+            if (req) {
+              req.status = "failed";
+              req.statusNote = "deadline reached — no window opened";
+            }
             return {
               status: "terminal",
               outcome: {
                 status: "completed",
                 result: { found: false, reason: "deadline" } as const,
-              },
+              } as const,
             };
           }
           return {

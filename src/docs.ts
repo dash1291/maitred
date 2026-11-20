@@ -22,6 +22,7 @@ export type RequestState = {
   statusNote?: string;
   recipeName?: string;
   bookingId?: string;
+  taskId?: string;
   createdAt?: number;
 };
 

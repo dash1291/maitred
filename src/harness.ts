@@ -88,6 +88,15 @@ export async function startWatch(
     },
     context,
   );
+  // tx.createTask() resolves to the TaskId only after the commit returns
+  // (inside the tx it is a Promise). Stamp it for the UI via a tiny second
+  // commit — the doc is the request->task map the web/telegram tiers use.
+  await m.root.commit(async (tx) => {
+    const requests = await tx.doc(Requests);
+    if (requests[input.requestId]) {
+      requests[input.requestId].taskId = String(watchId);
+    }
+  }, context);
   return watchId;
 }
 
