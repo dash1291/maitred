@@ -10,6 +10,7 @@ import {
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
+import { doublewordProvider } from "./doubleword.ts";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { AirMenusWatch } from "./tasks/watch.ts";
@@ -35,12 +36,17 @@ export async function bootstrap(): Promise<MaitredHarness> {
     }),
   );
 
-  // Watch tier: pure code, no model needed. Discovery tier (phase 2): uses
-  // Claude via ANTHROPIC_API_KEY from the environment. If the key is absent
-  // the daemon still boots and watches fine; discovery requests just fail
-  // at run time with a clear error.
+  // Watch tier: pure code, no model needed. Discovery tier (phase 2) needs a
+  // chat model; provider is env-chosen so the server's .env decides:
+  //   MAITRED_MODEL_PROVIDER=anthropic  (default; ANTHROPIC_API_KEY)
+  //   MAITRED_MODEL_PROVIDER=doubleword (DOUBLEWORD_API_KEY, personal creds)
+  // Without either key the daemon still boots and watches fine; discovery
+  // requests fail at run time with a clear auth error.
   const models = createModels();
-  if (process.env.ANTHROPIC_API_KEY) {
+  const providerChoice = process.env.MAITRED_MODEL_PROVIDER ?? "anthropic";
+  if (providerChoice === "doubleword" && process.env.DOUBLEWORD_API_KEY) {
+    models.setProvider(doublewordProvider());
+  } else if (process.env.ANTHROPIC_API_KEY) {
     models.setProvider(anthropicProvider());
   }
 
