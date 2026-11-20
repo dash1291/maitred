@@ -28,11 +28,24 @@ export interface RecipeValidation {
   courtesyFloor: number; // connector floor it must respect
 }
 
+// Ordering surface (phase-3, parked): filled opportunistically by recon when
+// the platform also hosts online/dine-in/takeaway ordering. Absent = the
+// restaurant is table-booking-only for our purposes, OrderExecute refuses.
+// Nothing in v1 consumes this; it is forward declaration so discovery can
+// bank the knowledge without a re-recon later.
+export interface RecipeOrdering {
+  kind: "airmenus-menu"; // connector method to read the menu
+  menuEndpoint?: string; // read-only GET; ids come from restaurant.ids
+  modes: ("dinein" | "takeaway" | "delivery")[]; // what the platform actually serves
+  notes?: string;
+}
+
 export interface Recipe {
   name: string; // canonical slug
   version: 1;
   restaurant: RecipeRestaurant;
   probe: RecipeProbe;
+  ordering?: RecipeOrdering;
   validation?: RecipeValidation;
   createdAt: string;
   discoveredBy: "manual" | "discovery";
@@ -70,6 +83,18 @@ export function validateRecipe(r: unknown): asserts r is Recipe {
   }
   if (!probe || !isPosInt(probe?.intervalSeconds)) {
     issues.push("probe.intervalSeconds must be a positive integer");
+  }
+  const ordering = o.ordering;
+  if (ordering !== undefined) {
+    const okModes = ["dinein", "takeaway", "delivery"];
+    if (ordering.kind !== "airmenus-menu") issues.push('ordering.kind must be "airmenus-menu"');
+    if (
+      !Array.isArray(ordering.modes) ||
+      ordering.modes.length === 0 ||
+      !ordering.modes.every((mm) => okModes.includes(mm))
+    ) {
+      issues.push("ordering.modes must be a non-empty subset of dinein/takeaway/delivery");
+    }
   }
   if (typeof o.createdAt !== "string") issues.push("createdAt (ISO string) required");
 

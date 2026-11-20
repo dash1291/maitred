@@ -67,6 +67,13 @@ FIELD RULES:
 - booking: research the POST endpoint and payload SHAPE; never execute it.
   auth.otp true if an OTP step exists, auth.captcha "none" |
   "recaptcha-enterprise" | whatever you actually observed.
+- ordering (optional, opportunistic ONLY): if IN PASSING — same fetches you
+  already do for the booking recipe — you see that the platform also hosts
+  online ordering for this outlet (menu endpoints, order/take-away flows
+  in the bundles), add an "ordering" object: {"kind": "airmenus-menu",
+  "modes": [...subset of dinein/takeaway/delivery actually served...],
+  "notes": <what you saw>}. Do NOT spend extra tool calls hunting for
+  ordering; it rides along or it is omitted. No ordering section = fine.
 - createdAt: ISO 8601 of the moment you emit it.
 - Did not verify something? Say so in booking.notes. Never fabricate.
 
