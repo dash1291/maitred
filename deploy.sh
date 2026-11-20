@@ -70,11 +70,17 @@ rsync -az --delete \
   --exclude node_modules --exclude state --exclude .env --exclude .git \
   ./ "$HOST:~/maitred/"
 
+# Pre-create the state dir owned by uid 1000 (compose user). Otherwise
+# Docker's daemon creates it root-owned on first `up`, and the container
+# crash-loops with SQLITE_CANTOPEN. This replaces the old root-chown cleanup.
+say "ensuring ~/maitred/state exists with container-compatible ownership..."
+ssh -o BatchMode=yes "$HOST" 'mkdir -p ~/maitred/state && stat -c "%u %g" ~/maitred/state | grep -q "^1000 1000" && du 2>/dev/null || docker run --rm -v ~/maitred/state:/s busybox chown -R 1000:1000 /s' 2>&1 | grep -v "^Unable\|^latest\|^Digest\|^Status\|^Downloading\|^Download\|^Pull" || true
+
 say "building image on server..."
 ssh -o BatchMode=yes "$HOST" 'cd ~/maitred && docker compose build --pull 2>&1 | tail -3'
 
 say "starting daemon (restart: unless-stopped)..."
-ssh -o BatchMode=yes "$HOST" 'cd ~/maitred && docker compose up -d && mkdir -p state'
+ssh -o BatchMode=yes "$HOST" 'cd ~/maitred && docker compose up -d'
 
 say "logs (ctrl-c to detach; container keeps running):"
 ssh -o BatchMode=yes "$HOST" 'cd ~/maitred && timeout 15 docker compose logs --tail 15 -f || true'
