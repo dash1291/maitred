@@ -6,7 +6,7 @@ import { bootstrap, startWatch } from "./harness.ts";
 import { fetchRestaurant } from "./connectors/airmenus.ts";
 import { watchTaskGraph } from "./print.ts";
 import { startFromMessage, confirmRecipe } from "./request.ts";
-import { findRecipe } from "./recipes.ts";
+import { loadRecipe, listRecipeNames } from "./recipes.ts";
 
 const args = process.argv.slice(2);
 const command = args[0] ?? "watch";
@@ -62,8 +62,13 @@ async function main() {
   }
 
   if (command === "recipes") {
-    const r = await findRecipe(args[1] ?? "guerilladiner");
-    console.log(r ? `${r.name}: platform=${r.restaurant.platformId} ids=${JSON.stringify(r.restaurant.ids)}` : "no match");
+    const names = await listRecipeNames();
+    for (const n of names) {
+      const r = await loadRecipe(n);
+      if (!r) continue;
+      console.log(`[maitred] ${r.name}: platform=${r.restaurant.platformId} ids=${JSON.stringify(r.restaurant.ids)}`);
+    }
+    if (!names.length) console.log("[maitred] no recipes known");
     return;
   }
 

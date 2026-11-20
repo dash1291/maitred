@@ -5,13 +5,14 @@
 //   unknown place -> Discover task ("maitred.discover"), which on success
 //                    publishes the recipe and spawns the watch itself
 //
-// Parsing is LLM-first (parse.ts): one cheap structured-output call per
-// message. The regex parser below is the no-model fallback for watch-only
-// deployments and a safety net if the model call fails.
+// Parsing is LLM-only (parse.ts): one cheap structured-output call per
+// message, which also routes — it sees the known-recipe list and returns the
+// matched recipe key (or null -> discovery). No host-side name matching.
+// Structured inputs (web form, API) never pass through free text.
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Requests } from "./docs.ts";
-import { findRecipe, slugify } from "./recipes.ts";
+import { loadRecipe, listRecipeNames } from "./recipes.ts";
 import { RecipeWatch } from "./tasks/watch.ts";
 import { Discover } from "./tasks/discover.ts";
 import type { DiscoverInput } from "./tasks/discover.ts";
@@ -20,11 +21,6 @@ import { mkdirSync } from "node:fs";
 import type { MaitredHarness } from "./harness.ts";
 import { parseRequestLlm, type ParsedRequest } from "./parse.ts";
 export { type ParsedRequest };
-
-const DEFAULT_CITY = "Bangalore";
-// (The LLM parser in parse.ts is the only parser. There is no regex
-// fallback: a message-driven deployment always has a model configured, and
-// structured inputs (web form, API) never pass through free text.
 
 export interface DispatchResult {
   requestId: string;
@@ -43,7 +39,8 @@ export async function parseRequest(
   message: string,
 ): Promise<ParsedRequest | null> {
   if (!m.models || !m.modelProvider) return null;
-  return parseRequestLlm(m.models, m.modelProvider, message);
+  const known = await listRecipeNames();
+  return parseRequestLlm(m.models, m.modelProvider, message, known);
 }
 
 
@@ -87,7 +84,9 @@ export async function startFromMessage(
   const via = "llm" as const;
   const requestId = `req-${Date.now()}`;
 
-  const recipe = await findRecipe(parsed.restaurantName);
+  // The parse call already decided: a matched recipe name routes to the
+  // watch, anything else starts discovery. No host-side matching.
+  const recipe = parsed.matchedRecipe ? await loadRecipe(parsed.matchedRecipe) : null;
 
   if (recipe) {
     // Known recipe: straight to the watch.
