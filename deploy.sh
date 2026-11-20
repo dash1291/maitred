@@ -65,10 +65,22 @@ EOF
 fi
 
 # ---------------- sync + build + run ----------------
-say "rsyncing project (no node_modules, no state, no secrets)..."
+say "rsyncing project (source only — no deps/state/secrets/local-junk)..."
+# include-list style: sync only what the image build needs, nothing else stays
+RSYNC_LIST=$(rsync -azn --stats \
+  --include 'Dockerfile' --include 'compose.yml' --include 'package.json' --include 'package-lock.json' \
+  --include '/src/***' --include '/recipes***' --include '.env.example' \
+  --exclude '*' \
+  ./ "$HOST:~/maitred/" | grep -E 'Total transferred file size' | grep -oE '[0-9]+')
+if [ "${RSYNC_LIST:-0}" -gt 50000000 ]; then
+  fail "refusing to rsync: transfer would be ${RSYNC_LIST} bytes (>50MB) — deploy payload should be tiny source files only"
+fi
 rsync -az --delete \
-  --exclude node_modules --exclude state --exclude .env --exclude .git \
+  --include 'Dockerfile' --include 'compose.yml' --include 'package.json' --include 'package-lock.json' \
+  --include '/src/***' --include '/recipes***' --include '.env.example' \
+  --exclude '*' \
   ./ "$HOST:~/maitred/"
+say "transferred $(numfmt --to=iec "$RSYNC_LIST" 2>/dev/null || echo "$RSYNC_LIST bytes")"
 
 # Pre-create the state dir owned by uid 1000 (compose user). Otherwise
 # Docker's daemon creates it root-owned on first `up`, and the container
