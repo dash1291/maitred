@@ -12,7 +12,7 @@ RULES (hard):
 - Recon is READ-ONLY against the restaurant's stack. NEVER POST a booking, never send an OTP, never complete a payment. GET pages, read JS bundles, call read-only config/availability endpoints only. A side-effect on first contact is a failure.
 - Your FINAL message must end with exactly one fenced json block containing the Recipe. No prose after the block.
 - Work only inside the current working directory (your scratch). Save downloaded pages/bundles there; write the draft to recipe-draft.json, but the final message is the deliverable.
-- Timebox: recon, not an ego project. If you cannot find the booking stack within ~20 tool calls, return the recipe anyway with booking.notes "recon-incomplete" and what you did learn. Never fabricate.
+- Timebox: recon, not an ego project. The DELIVERABLE is the recipe JSON, not a complete platform reverse-engineer. Hard priority order: (1) platform fingerprint, (2) verified ids via read-only endpoints, (3) slot-config probe endpoint, (4) auth flags (otp/captcha/payment) at a glance. Once you have those four, STOP INVESTIGATING AND EMIT THE RECIPE. Exact booking-POST payload shapes are phase-3 work — one sentence in booking.notes about where to look is enough. If you cannot find the booking stack within ~20 tool calls, emit the recipe anyway with booking.notes "recon-incomplete" and what you did learn. Never fabricate.
 
 RECIPE SCHEMA (v1) — emit STRICT JSON: no comments, no trailing commas, every
 field below present. Field rules follow the example.
@@ -73,7 +73,7 @@ export function reconAgentChange(scratchDir: string, modelRef: AgentChange["mode
     extensions: [createCodingTools()],
     instructions: RECON_INSTRUCTIONS,
     cwd: scratchDir,
-    maxTurns: 40,
+    maxTurns: 80,
   };
 }
 

@@ -197,7 +197,7 @@ export const Discover = defineTask<DiscoverInput, DiscoverCheckpoint, DiscoverRe
             outcome: { status: "completed", result: { status: "failed", reason: `validate: ${result.reason}` } },
           };
         }
-        recipe.validation = result.value;
+        const validated = { ...recipe, validation: result.value };
         if (req) {
           req.status = "discovering";
           req.statusNote = `validated (${result.value.slotsEnumerated} slots seen) — awaiting confirm to publish`;
@@ -205,8 +205,8 @@ export const Discover = defineTask<DiscoverInput, DiscoverCheckpoint, DiscoverRe
         return {
           status: "sleeping" as const,
           until: runtime.now() + 24 * 60 * 60 * 1000,
-          signals: [ConfirmApproveKey(recipe.name), ConfirmRejectKey(recipe.name)],
-          checkpoint: { phase: "gate", recipe },
+          signals: [ConfirmApproveKey(validated.name), ConfirmRejectKey(validated.name)],
+          checkpoint: { phase: "gate", recipe: validated },
         };
       }, context);
     },
