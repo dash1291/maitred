@@ -138,8 +138,13 @@ export const Discover = defineTask<DiscoverInput, DiscoverCheckpoint, DiscoverRe
         const jsonText = blocks.length > 0 ? blocks[blocks.length - 1][1] : null;
         if (!jsonText) {
           // No recipe, but the agent's final words say why — show them.
-          const firstLine = answer.split("\n").find((l) => l.trim().length > 0) ?? "";
-          const reason = firstLine.slice(0, 200);
+          // The reports end with a summary; take the last non-empty line
+          // that reads like a sentence (agent chatter above is tool narration).
+          const lines = answer.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+          const sentence = [...lines]
+            .reverse()
+            .find((l) => l.length > 40 && /\b(is|was|uses|takes|not|no|only|via|found)\b/i.test(l) && !/^[a-z]/.test(l));
+          const reason = (sentence ?? lines[0] ?? "").slice(0, 200);
           if (req) {
             req.status = "failed";
             req.statusNote = `no recipe: ${reason}`;
