@@ -11,6 +11,8 @@ services:
     volumes:
       - ./state:/maitred/state
     # console on host loopback ONLY — reach it via ssh -L, never from the net
+    environment:
+      - MAITRED_WEB_BIND=0.0.0.0
     ports:
       - "127.0.0.1:8681:8681"
     logging:

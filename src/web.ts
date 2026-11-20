@@ -15,6 +15,10 @@ import type { TaskId } from "@earendil-works/pi-durable";
 import type { WatchResult } from "./tasks/watch.ts";
 
 const PORT = Number(process.env.MAITRED_WEB_PORT ?? 8681);
+// In Docker, published ports arrive via the container's eth interface, so we
+// must bind 0.0.0.0 there; the host-level exposure is still loopback-only
+// (compose maps 127.0.0.1:8681 -> container). Bare-metal default stays loopback.
+const BIND = process.env.MAITRED_WEB_BIND ?? "127.0.0.1";
 const STATE_DIR = path.resolve(process.cwd(), "state");
 const HTML = readFileSync(path.resolve(import.meta.dirname, "webui.html"), "utf8");
 
@@ -142,8 +146,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log("[maitred] web console at http://127.0.0.1:" + PORT + " (token: state/webtoken)");
+server.listen(PORT, BIND, () => {
+  console.log("[maitred] web console at http://" + BIND + ":" + PORT + " (token: state/webtoken)");
 });
 
 // keep alive alongside the durable scheduler
