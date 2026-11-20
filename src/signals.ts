@@ -22,3 +22,13 @@ export const Control = defineSignal({
   version: 1,
   schema: obj({ action: str(), arg: opt(str()) }),
 });
+
+// Discovery publish gate: the recipe-approve confirm is delivered under
+// two distinct keys so a sleeping task only needs to know WHICH key woke
+// it — approve vs reject — never parsing the value.
+export function ConfirmApproveKey(recipeName: string) {
+  return Confirm.key(`maitred.recipe:${recipeName}:approve`);
+}
+export function ConfirmRejectKey(recipeName: string) {
+  return Confirm.key(`maitred.recipe:${recipeName}:reject`);
+}

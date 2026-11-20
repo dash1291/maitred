@@ -1,40 +1,34 @@
 {
-  "$schema": "./schema.md",
+  "name": "guerilladiner",
   "version": 1,
-  "restaurant": "Guerilla Diner",
-  "platform": "airmenus",
-  "discovered": "2026-11-20",
-  "recon": {
-    "restaurant_short_name": "guerilladiner",
-    "outlet_short_name": "order",
-    "restaurant_id": 1360,
-    "outlet_id": 1406,
-    "notes": [
-      "Booking site https://bookings.airmenus.in/guerilladiner/order",
-      "API base https://apis.airmenus.in/api/",
-      "Popup-style: all weekday is_open=false outside release windows; flip-open moment is the race",
-      "Slot group 'Bench Seats' (title casing varies per day: also 'Bench seat(s)'); 6 slots 17:00-22:00",
-      "Deposit INR 500/head, min 1 max 6 pax, days_ahead=5",
-      "Booking POST /reservations/booking/ needs { outlet_id, total, payment_mode: 'nopay'|'paynow', booking_dt, booking_details: { guests_count, group, instructions } }",
-      "Razorpay checkout (key rzp_live_...) triggered for paynow; nopay skips it",
-      "Auth: OTP send/verify endpoints exist (POST /auth/otp/send/, /auth/otp/verify/) - gating unclear, assume OTP may interpose at booking time",
-      "Frontend has Google reCAPTCHA Enterprise on checkout (site key 6LcxXgYqAAAAAGG...) - server enforcement unverified; direct API POST may bypass",
-      "Outlet 1406 is special-cased in frontend to NOT show remaining pax UI; remaining/paxs endpoint returns {} when no bookings yet"
-    ]
+  "restaurant": {
+    "displayName": "Guerilla Diner",
+    "city": "Bangalore",
+    "website": "https://guerilladiner.com",
+    "bookingPage": "https://bookings.airmenus.in/guerilladiner/order",
+    "platformId": "airmenus",
+    "ids": {
+      "shortName": "guerilladiner",
+      "restaurantId": 1360,
+      "outletId": 1406
+    }
   },
   "probe": {
-    "type": "airmenus.config",
-    "poll_seconds": 4,
-    "open_signal": "setting.<weekday>.is_open === true",
-    "availability": "reservations/slot_group/remaining/paxs/?group_title=&booking_dt=&outlet_id="
+    "kind": "days-config",
+    "intervalSeconds": 4
   },
-  "book": {
-    "type": "airmenus.booking",
-    "endpoint": "https://apis.airmenus.in/api/reservations/booking/",
-    "requires": ["first_name", "last_name", "email", "phone_number"],
-    "gates": ["confirm", "otp?"]
+  "booking": {
+    "method": "POST https://apis.airmenus.in/api/reservations/booking/",
+    "paymentModes": [
+      "nopay",
+      "paynow"
+    ],
+    "auth": {
+      "otp": true,
+      "captcha": "recaptcha-enterprise"
+    },
+    "notes": "reversed from bookings checkout.js; outlet 1406 hides remaining-pax client-side; fallback phone +91 8494953284 (phase 3)"
   },
-  "fallback": {
-    "phone": "+91 8494953284"
-  }
+  "createdAt": "2026-11-20T00:00:00.000Z",
+  "discoveredBy": "manual"
 }

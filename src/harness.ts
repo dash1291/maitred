@@ -8,13 +8,14 @@ import {
   Harness as HarnessImpl,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { createModels } from "@earendil-works/pi-ai/models";
+import { createModels, type Models } from "@earendil-works/pi-ai/models";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { doublewordProvider } from "./doubleword.ts";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { AirMenusWatch } from "./tasks/watch.ts";
+import { AirMenusWatch, RecipeWatch } from "./tasks/watch.ts";
 import type { WatchInput, WatchResult } from "./tasks/watch.ts";
+import { Discover } from "./tasks/discover.ts";
 import { Requests } from "./docs.ts";
 
 const STATE_DIR = path.resolve(process.cwd(), "state");
@@ -23,6 +24,9 @@ mkdirSync(STATE_DIR, { recursive: true });
 export interface MaitredHarness {
   harness: Harness;
   root: Conversation;
+  /** Present when a model provider is configured (discovery + LLM parsing). */
+  models?: Models;
+  modelProvider?: string;
 }
 
 export async function bootstrap(): Promise<MaitredHarness> {
@@ -32,7 +36,7 @@ export async function bootstrap(): Promise<MaitredHarness> {
   registry.install(
     defineExtension({
       name: "maitred",
-      tasks: [AirMenusWatch],
+      tasks: [AirMenusWatch, RecipeWatch, Discover],
     }),
   );
 
@@ -58,7 +62,15 @@ export async function bootstrap(): Promise<MaitredHarness> {
   const root = await harness.root(context);
   harness.resume();
 
-  return { harness, root };
+  const hasProvider =
+    (providerChoice === "doubleword" && Boolean(process.env.DOUBLEWORD_API_KEY)) ||
+    (providerChoice !== "doubleword" && Boolean(process.env.ANTHROPIC_API_KEY));
+  return {
+    harness,
+    root,
+    models: hasProvider ? models : undefined,
+    modelProvider: hasProvider ? providerChoice : undefined,
+  };
 }
 
 // Spawn a durable watch. Used by the CLI (phase 1) and the Telegram bot

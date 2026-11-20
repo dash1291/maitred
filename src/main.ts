@@ -5,6 +5,8 @@
 import { bootstrap, startWatch } from "./harness.ts";
 import { fetchRestaurant } from "./connectors/airmenus.ts";
 import { watchTaskGraph } from "./print.ts";
+import { startFromMessage, confirmRecipe } from "./request.ts";
+import { findRecipe } from "./recipes.ts";
 
 const args = process.argv.slice(2);
 const command = args[0] ?? "watch";
@@ -31,6 +33,37 @@ async function main() {
   if (command === "daemon") {
     console.log(`[maitred] daemon mode: resuming durable tasks, waiting`);
     await daemon(m);
+    return;
+  }
+
+  if (command === "message") {
+    const message = args.slice(1).join(" ") || 'table for 2 at "Guerilla Diner" saturday dinner';
+    console.log(`[maitred] message: ${message}`);
+    const r = await startFromMessage(m, message);
+    if (r.route === "rejected") {
+      console.error(`[maitred] rejected: ${r.error}`);
+      process.exit(1);
+    }
+    console.log(`[maitred] routed=${r.route} requestId=${r.requestId} task=${r.taskId}${r.recipeName ? ` recipe=${r.recipeName}` : ""}`);
+    await watchTaskGraph(m);
+    return;
+  }
+
+  if (command === "confirm") {
+    const requestId = args[1];
+    const approve = (args[2] ?? "yes") !== "no";
+    if (!requestId) {
+      console.error("usage: confirm <requestId> [yes|no]");
+      process.exit(1);
+    }
+    const res = await confirmRecipe(m, requestId, approve);
+    console.log(`[maitred] confirm(${approve}) ${requestId} -> ${res}`);
+    return;
+  }
+
+  if (command === "recipes") {
+    const r = await findRecipe(args[1] ?? "guerilladiner");
+    console.log(r ? `${r.name}: platform=${r.restaurant.platformId} ids=${JSON.stringify(r.restaurant.ids)}` : "no match");
     return;
   }
 

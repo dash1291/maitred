@@ -23,6 +23,7 @@ export type RequestState = {
   recipeName?: string;
   bookingId?: string;
   taskId?: string;
+  reconConversationId?: number; // discovery: recon agent conversation id
   createdAt?: number;
 };
 
