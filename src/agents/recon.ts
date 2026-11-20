@@ -14,29 +14,42 @@ RULES (hard):
 - Work only inside the current working directory (your scratch). Save downloaded pages/bundles there; write the draft to recipe-draft.json, but the final message is the deliverable.
 - Timebox: recon, not an ego project. If you cannot find the booking stack within ~20 tool calls, return the recipe anyway with booking.notes "recon-incomplete" and what you did learn. Never fabricate.
 
-RECIPE SCHEMA (v1, exact):
+RECIPE SCHEMA (v1) — emit STRICT JSON: no comments, no trailing commas, every
+field below present. Field rules follow the example.
 {
-  "name": "lowercase-slug",                  // canonical, a-z0-9- only, 2-60 chars
+  "name": "lowercase-slug",
   "version": 1,
   "restaurant": {
      "displayName": "Human Name",
      "city": "City",
-     "website": "https://...",               // optional
-     "bookingPage": "https://...",            // where the reserve flow starts
+     "website": "https://...",
+     "bookingPage": "https://...",
      "platformId": "airmenus",
-     "ids": {}                                // platform ids; known platform demands:
-                                              //  airmenus: shortName (string), outletId (number)
+     "ids": {}
   },
-  "probe": { "kind": "days-config", "intervalSeconds": 4 },  // min 4; be a polite guest
-  "booking": {                                // research the booking POST; DO NOT execute it
+  "probe": { "kind": "days-config", "intervalSeconds": 4 },
+  "booking": {
      "method": "POST https://api.example/…",
      "auth": { "otp": false, "captcha": "none" },
      "paymentModes": [],
-     "notes": "flow + payload shape phase-3 will need"
+     "notes": "…"
   },
-  "createdAt": "<ISO 8601 now>",
+  "createdAt": "2026-11-20T17:00:00.000Z",
   "discoveredBy": "discovery"
 }
+FIELD RULES:
+- name: lowercase slug, letters/digits/hyphens only, 2-60 chars, no spaces.
+- website/bookingPage: bookingPage is where the reserve flow starts; omit
+  website only if unverifiable (better: also omit than guess — but prefer
+  finding it via bash).
+- platformId: the ONLY valid value today is "airmenus".
+- ids: airmenus demands "shortName" (string) and "outletId" (number).
+- probe.intervalSeconds: 4 minimum (polite guest).
+- booking: research the POST endpoint and payload SHAPE; never execute it.
+  auth.otp true if an OTP step exists, auth.captcha "none" |
+  "recaptcha-enterprise" | whatever you actually observed.
+- createdAt: ISO 8601 of the moment you emit it.
+- Did not verify something? Say so in booking.notes. Never fabricate.
 
 The only platformId you may claim today is "airmenus". Its tells: bookings.airmenus.in iframe/hosted page, apis.airmenus.in/api strings in its JS bundles. If you cannot place the restaurant on a known platform, return the recipe with platformId "airmenus" replaced by nothing valid — i.e. fail honestly: set ids {} and booking.notes "UNKNOWN-PLATFORM: <what you found>". A recipe with empty ids will be rejected by validation, which is the correct outcome for an unknown platform today.
 
@@ -54,8 +67,9 @@ export function scratchDirFor(requestId: string): string {
 }
 
 /** Agent change for the recon conversation: coding tools + instructions. */
-export function reconAgentChange(scratchDir: string): AgentChange {
+export function reconAgentChange(scratchDir: string, modelRef: AgentChange["model"]): AgentChange {
   return {
+    model: modelRef,
     extensions: [createCodingTools()],
     instructions: RECON_INSTRUCTIONS,
     cwd: scratchDir,

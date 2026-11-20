@@ -7,7 +7,9 @@ import {
   type TaskId,
   Harness as HarnessImpl,
 } from "@earendil-works/pi-durable";
+import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { createModels, type Models } from "@earendil-works/pi-ai/models";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { doublewordProvider } from "./doubleword.ts";
@@ -33,6 +35,9 @@ export async function bootstrap(): Promise<MaitredHarness> {
   const context = BACKGROUND_CONTEXT;
 
   const registry = createRegistry();
+  // The recon agent selects the "coding-tools" extension by name; installing
+  // it in the registry is what actually provides bash/read/write/edit.
+  registry.install(CodingTools);
   registry.install(
     defineExtension({
       name: "maitred",
@@ -58,7 +63,20 @@ export async function bootstrap(): Promise<MaitredHarness> {
     path.join(STATE_DIR, "maitred.sqlite"),
   );
 
-  const harness = await HarnessImpl.open(storage, { models, registry }, context);
+  const harness = await HarnessImpl.open(
+    storage,
+    {
+      models,
+      registry,
+      // Each conversation gets its own Node execution environment rooted at
+      // the agent's cwd (the recon scratch), so tools run sandboxed to it.
+      env: (target) =>
+        target.cwd
+          ? new NodeExecutionEnv({ cwd: target.cwd, shellEnv: process.env })
+          : undefined,
+    },
+    context,
+  );
   const root = await harness.root(context);
   harness.resume();
 

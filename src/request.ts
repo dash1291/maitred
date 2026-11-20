@@ -46,6 +46,26 @@ export async function parseRequest(
   return parseRequestLlm(m.models, m.modelProvider, message);
 }
 
+
+// The recon agent needs a capable chat model (it runs tools and reads JS).
+// Per-provider defaults, overridable; falls back to the provider's first
+// model if a hardcoded id has gone stale.
+export function reconModelFor(m: MaitredHarness): { provider: string; modelId: string } {
+  const provider = m.modelProvider!;
+  const wanted =
+    process.env.MAITRED_RECON_MODEL ??
+    (provider === "doubleword"
+      ? "zai-org/GLM-5.3"
+      : "claude-sonnet-4-5");
+  const models = m.models!;
+  const exact = models.getModel(provider, wanted);
+  if (exact) return { provider, modelId: wanted };
+  const any = models.getModels(provider)[0];
+  if (!any) throw new Error(`provider ${provider} has no models`);
+  return { provider, modelId: any.id };
+}
+
+// Route one message.
 // Route one message. Exactly one Request doc entry is created; it gets a
 // taskId (watch or discover) and, for discovery, a reconConversationId.
 export async function startFromMessage(
@@ -132,7 +152,7 @@ export async function startFromMessage(
   const conv = await m.harness.createConversation(
     {
       ownership: { kind: "task", taskId: discoverId as never },
-      agent: reconAgentChange(scratch),
+      agent: reconAgentChange(scratch, reconModelFor(m)),
     },
     context,
   );
