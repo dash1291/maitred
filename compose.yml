@@ -1,0 +1,19 @@
+services:
+  maitred:
+    build: .
+    image: maitred:latest
+    container_name: maitred
+    # state on a bind mount, owned by uid 1000 (dev) on the host
+    user: "1000:1000"
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./state:/maitred/state
+    # outbound-only: no ports published, nothing reachable from outside
+    # deploy management via `ssh dev@... docker compose ...`
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,7 @@
+node_modules/
+state/
+.git/
+.env
+*.log
+tsconfig.json
+README.md
