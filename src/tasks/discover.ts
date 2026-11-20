@@ -270,6 +270,9 @@ export const Discover = defineTask<DiscoverInput, DiscoverCheckpoint, DiscoverRe
             checkpoint: { phase: "awaitWatch", recipe, watchTaskId: task.state.checkpoint.watchTaskId },
           };
         }
+        // Task-owned child: ownership by this discover task — it is reaped
+        // with the recipe conversation if aborted. The runtime hands us our
+        // own TaskId via the RunningTask record.
         const watchId = await tx.createTask(
           RecipeWatch,
           {
@@ -280,7 +283,7 @@ export const Discover = defineTask<DiscoverInput, DiscoverCheckpoint, DiscoverRe
             pollSeconds: input.pollSeconds,
             giveUpAt: input.giveUpAt,
           },
-          { ownership: { kind: "task" } as never },
+          { ownership: { kind: "task", taskId: task.id } },
         );
         return {
           status: "waiting" as const,

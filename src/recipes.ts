@@ -49,8 +49,11 @@ export async function findRecipe(spoken: string): Promise<Recipe | null> {
   let best: { score: number; stem: string } | null = null;
   for (const stem of stems) {
     const low = stem.toLowerCase();
-    if (norm.includes(low) || low.includes(norm)) {
-      const score = Math.min(low.length, norm.length);
+    // Compare purely alphanumeric forms: stems contain dashes, spoken
+    // names don't ("guerilladiner" ~ "guerilla-diner").
+    const alnum = low.replace(/[^a-z0-9]/g, "");
+    if (alnum && (norm.includes(alnum) || alnum.includes(norm))) {
+      const score = Math.min(alnum.length, norm.length);
       if (!best || score > best.score) best = { score, stem };
     }
   }
