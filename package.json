@@ -1,0 +1,26 @@
+{
+ "name": "maitred",
+ "version": "0.1.0",
+ "description": "Personal reservation agent on pi-durable",
+ "main": "index.js",
+ "scripts": {
+  "start": "node --experimental-strip-types src/main.ts",
+  "typecheck": "tsc --noEmit"
+ },
+ "keywords": [],
+ "author": "",
+ "license": "ISC",
+ "type": "module",
+ "engines": {
+  "node": ">=22"
+ },
+ "dependencies": {
+  "@earendil-works/chord": "^1.6.0",
+  "@earendil-works/pi-ai": "^1.6.0",
+  "@earendil-works/pi-durable": "^1.6.0"
+ },
+ "devDependencies": {
+  "@types/node": "^26.6.6",
+  "typescript": "^7.0.2"
+ }
+}
