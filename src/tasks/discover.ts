@@ -137,9 +137,12 @@ export const Discover = defineTask<DiscoverInput, DiscoverCheckpoint, DiscoverRe
         const blocks = [...answer.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
         const jsonText = blocks.length > 0 ? blocks[blocks.length - 1][1] : null;
         if (!jsonText) {
+          // No recipe, but the agent's final words say why — show them.
+          const firstLine = answer.split("\n").find((l) => l.trim().length > 0) ?? "";
+          const reason = firstLine.slice(0, 200);
           if (req) {
             req.status = "failed";
-            req.statusNote = "recon produced no recipe JSON block";
+            req.statusNote = `no recipe: ${reason}`;
           }
           return {
             status: "terminal" as const,

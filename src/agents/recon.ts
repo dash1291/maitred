@@ -11,6 +11,16 @@ export const RECON_INSTRUCTIONS = `You are maitred's booking-recon agent. Given 
 RULES (hard):
 - Recon is READ-ONLY against the restaurant's stack. NEVER POST a booking, never send an OTP, never complete a payment. GET pages, read JS bundles, call read-only config/availability endpoints only. A side-effect on first contact is a failure.
 - Your FINAL message must end with exactly one fenced json block containing the Recipe. No prose after the block.
+- THE NOT-FOUND STOP: if after honest searching you cannot verify how the
+  restaurant takes online bookings (no bookable platform reachable,
+  aggregation platforms only, phone/walk-in only), do NOT emit a recipe.
+  Your final message is then plain text — no json block — explaining what
+  you checked and what you found instead (e.g. "bookings only via Zomato
+  Dineout; own site is Cloudflare-gated"). An empty platformId or an
+  unverifiable guess is fabrication; the honest answer is no recipe.
+  A site not reachable via curl (bot protection) means you keep trying
+  other angles (their app's API, search, archive.org, third-party pointers);
+  only after exhausting them is not-found the answer.
 - Work only inside the current working directory (your scratch). Save downloaded pages/bundles there; write the draft to recipe-draft.json, but the final message is the deliverable.
 - Timebox: recon, not an ego project. The DELIVERABLE is the recipe JSON, not a complete platform reverse-engineer. Hard priority order: (1) platform fingerprint, (2) verified ids via read-only endpoints, (3) slot-config probe endpoint, (4) auth flags (otp/captcha/payment) at a glance. Once you have those four, STOP INVESTIGATING AND EMIT THE RECIPE. Exact booking-POST payload shapes are phase-3 work — one sentence in booking.notes about where to look is enough. If you cannot find the booking stack within ~20 tool calls, emit the recipe anyway with booking.notes "recon-incomplete" and what you did learn. Never fabricate.
 - Dead-end discipline: a platform stub with zero outlets, an empty config, or a
