@@ -6,6 +6,9 @@ services:
     # state on a bind mount, owned by uid 1000 (dev) on the host
     user: "1000:1000"
     restart: unless-stopped
+    # Playwright's profile (v1.65.1): Docker's default plus user namespaces, which Chromium's sandbox needs as non-root
+    security_opt:
+      - seccomp=./seccomp_profile.json
     env_file:
       - .env
     volumes:

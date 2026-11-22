@@ -1,9 +1,8 @@
 # maitred container. Built on the target host (x86_64) by deploy.sh.
 FROM node:22-slim
 
-# tiny init for clean signal handling (SIGTERM -> node)
-# tini: clean SIGTERM; curl+python3: the recon agent's read-only crawl tools
-RUN apt-get update && apt-get install -y --no-install-recommends tini curl jq python3 ca-certificates \
+# tini: clean signal handling (SIGTERM -> node)
+RUN apt-get update && apt-get install -y --no-install-recommends tini ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /maitred
@@ -12,10 +11,14 @@ WORKDIR /maitred
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
+# Chromium for the browser tool, outside any home directory so uid 1000 can run it
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN npx playwright install --with-deps --only-shell chromium \
+    && chmod -R a+rX /ms-playwright && rm -rf /var/lib/apt/lists/*
+
 # app
 COPY src ./src
 COPY recipes ./recipes
-COPY .env.example ./
 
 # state lives on a bind mount; created by compose/deploy.sh
 ENV NODE_ENV=production

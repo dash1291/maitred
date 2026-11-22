@@ -56,10 +56,9 @@ Created an empty ~/maitred/.env on the server. Fill it in now (chmod 600 is set)
     ssh $HOST 'vi ~/maitred/.env'
 
 Template:
-    MAITRED_MODEL_PROVIDER=doubleword
-    DOUBLEWORD_API_KEY=<your personal key>
+    ANTHROPIC_API_KEY=<your key>
 
-Rerun this script afterwards. (Watch-only mode with no key also works.)
+Rerun this script afterwards. (Without a key the daemon still runs watches started by hand.)
 EOF
   fail "secrets not configured yet"
 fi
@@ -69,7 +68,7 @@ say "rsyncing project (source only — no deps/state/secrets/local-junk)..."
 # include-list style: sync only what the image build needs, nothing else stays
 RSYNC_LIST=$(rsync -azn --stats \
   --include 'Dockerfile' --include 'compose.yml' --include 'package.json' --include 'package-lock.json' \
-  --include '/src/***' --include '/recipes***' --include '.env.example' \
+  --include '/src/***' --include '/recipes***' --include 'seccomp_profile.json' \
   --exclude '*' \
   ./ "$HOST:~/maitred/" | grep -E 'Total transferred file size' | grep -oE '[0-9]+')
 if [ "${RSYNC_LIST:-0}" -gt 50000000 ]; then
@@ -77,7 +76,7 @@ if [ "${RSYNC_LIST:-0}" -gt 50000000 ]; then
 fi
 rsync -az --delete \
   --include 'Dockerfile' --include 'compose.yml' --include 'package.json' --include 'package-lock.json' \
-  --include '/src/***' --include '/recipes***' --include '.env.example' \
+  --include '/src/***' --include '/recipes***' --include 'seccomp_profile.json' \
   --exclude '*' \
   ./ "$HOST:~/maitred/"
 say "transferred $(numfmt --to=iec "$RSYNC_LIST" 2>/dev/null || echo "$RSYNC_LIST bytes")"
@@ -86,7 +85,7 @@ say "transferred $(numfmt --to=iec "$RSYNC_LIST" 2>/dev/null || echo "$RSYNC_LIS
 # Docker's daemon creates it root-owned on first `up`, and the container
 # crash-loops with SQLITE_CANTOPEN. This replaces the old root-chown cleanup.
 say "ensuring ~/maitred/state exists with container-compatible ownership..."
-ssh -o BatchMode=yes "$HOST" 'mkdir -p ~/maitred/state && stat -c "%u %g" ~/maitred/state | grep -q "^1000 1000" && du 2>/dev/null || docker run --rm -v ~/maitred/state:/s busybox chown -R 1000:1000 /s' 2>&1 | grep -v "^Unable\|^latest\|^Digest\|^Status\|^Downloading\|^Download\|^Pull" || true
+ssh -o BatchMode=yes "$HOST" 'mkdir -p ~/maitred/state && stat -c "%u %g" ~/maitred/state | grep -q "^1000 1000" || docker run --rm -v ~/maitred/state:/s busybox chown -R 1000:1000 /s' 2>&1 | grep -v "^Unable\|^latest\|^Digest\|^Status\|^Downloading\|^Download\|^Pull" || true
 
 say "building image on server..."
 ssh -o BatchMode=yes "$HOST" 'cd ~/maitred && docker compose build --pull 2>&1 | tail -3'
