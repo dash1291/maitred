@@ -3,11 +3,8 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completio
 import { envApiKeyAuth } from "@earendil-works/pi-ai";
 import type { Provider, Model } from "@earendil-works/pi-ai";
 
-// Doubleword personal account: OpenAI-compatible inference at
-// api.doubleword.ai/v1 (open-weight models, verified in the gateway POC:
-// Qwen 3.x, DeepSeek V4.1, GLM-5.3, Kimi-k3, ...).
-// Model list is deliberately explicit — picked for the one job this provider
-// will hold (discovery recon: long-context bundle reading, tool calling).
+// Doubleword: OpenAI-compatible inference for open-weight models. An alternative to the Anthropic provider,
+// selected with MAITRED_MODEL_PROVIDER=doubleword.
 
 const DOUBLEWORD_BASE = "https://api.doubleword.ai/v1";
 
@@ -23,8 +20,7 @@ const MODEL_DEFS: Model<"openai-completions">[] = [
     input: ["text"],
     contextWindow: 128_000,
     maxTokens: 8192,
-    // Doubleword bills per-token; exact rates for these quants unknown, so
-    // cost is marked zero — maitred only reports cost, never enforces it.
+    // Rates are not known here, so reported cost is zero for this provider.
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   },
   {

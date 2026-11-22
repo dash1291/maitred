@@ -1,10 +1,10 @@
 {
  "name": "maitred",
  "version": "0.1.0",
- "description": "Personal reservation agent on pi-durable",
- "main": "index.js",
+ "description": "A personal assistant that watches booking pages and tells you the moment something opens",
  "scripts": {
-  "start": "node --experimental-strip-types src/main.ts",
+  "start": "node --env-file-if-exists=.env --experimental-strip-types src/web.ts",
+  "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
   "typecheck": "tsc --noEmit"
  },
  "keywords": [],
@@ -17,7 +17,11 @@
  "dependencies": {
   "@earendil-works/chord": "^1.6.0",
   "@earendil-works/pi-ai": "^1.6.0",
-  "@earendil-works/pi-durable": "^1.6.0"
+  "@earendil-works/pi-codemode": "^1.6.0",
+  "@earendil-works/pi-durable": "^1.6.0",
+  "@earendil-works/pi-schema": "^1.6.0",
+  "grammy": "^1.46.0",
+  "playwright": "^1.65.1"
  },
  "devDependencies": {
   "@types/node": "^26.6.6",

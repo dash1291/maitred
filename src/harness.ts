@@ -1,144 +1,218 @@
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import {
-  createRegistry,
-  defineExtension,
-  type Conversation,
-  type Harness,
-  type TaskId,
-  Harness as HarnessImpl,
-} from "@earendil-works/pi-durable";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
-import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { createModels, type Models } from "@earendil-works/pi-ai/models";
-import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
-import { doublewordProvider } from "./doubleword.ts";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { AirMenusWatch, RecipeWatch } from "./tasks/watch.ts";
-import type { WatchInput, WatchResult } from "./tasks/watch.ts";
-import { Discover } from "./tasks/discover.ts";
-import { Requests } from "./docs.ts";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { createModels, type Models } from "@earendil-works/pi-ai/models";
+import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
+import {
+  AssistantEntry,
+  createRegistry,
+  defineExtension,
+  GenerationTask,
+  Harness as HarnessImpl,
+  hook,
+  type Conversation,
+  type Harness,
+  type ModelRef,
+  type SignalResult,
+  type Storage,
+  type Submission,
+  type TaskId,
+  type TypedEntry,
+} from "@earendil-works/pi-durable";
+import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { Approval, DECISION, TypingAllowances } from "./approval.ts";
+import { createBrowsers } from "./browser.ts";
+import { instructions } from "./assistant.ts";
+import { BUILTIN_RECIPES_DIR, localStamp, STATE_DIR, TIMEZONE } from "./config.ts";
+import { doublewordProvider } from "./doubleword.ts";
+import { listedHosts, publicHost, type HostPolicy } from "./http.ts";
+import { createTelegram, type TelegramOptions } from "./telegram.ts";
+import { createBrowserTool } from "./tools/browser.ts";
+import { createRecipesSection, createRecipesTool, createRecipeStore, type RecipeStore } from "./tools/recipes.ts";
+import { createWatchTool } from "./tools/watch.ts";
+import { createWatchTask, listNewWatch, vetWatch, WATCH_TASK_OPTIONS, type WatchProof, type WatchSpec } from "./watch.ts";
 
-const STATE_DIR = path.resolve(process.cwd(), "state");
-mkdirSync(STATE_DIR, { recursive: true });
+export type BootOptions = {
+  storage?: Storage;
+  /** A `Models` with its provider set, and the model the assistant runs on. Default: from the environment. */
+  models?: Models;
+  model?: ModelRef;
+  recipeDirs?: { writable: string; builtin: string };
+  /** Which hosts may be reached at all. Default: public hosts only. */
+  reachable?: HostPolicy;
+  timezone?: string;
+  /** Default: from MAITRED_TELEGRAM_TOKEN and MAITRED_TELEGRAM_CHAT. null: no Telegram. */
+  telegram?: TelegramOptions | null;
+};
 
-export interface MaitredHarness {
+export type Answer = { ok: true; text: string } | { ok: false; reason: string };
+
+export type Maitred = {
   harness: Harness;
   root: Conversation;
-  /** Present when a model provider is configured (discovery + LLM parsing). */
-  models?: Models;
-  modelProvider?: string;
+  model: ModelRef | undefined;
+  recipes: RecipeStore;
+  /** Hand the assistant a message from the person. */
+  say(text: string, requestId?: string): Promise<Submission>;
+  answerOf(submission: Submission): Promise<Answer>;
+  /** Start a watch without the model; the same checks as the watch tool. Returns its id, or why it did not start. */
+  startWatch(spec: WatchSpec, proof?: WatchProof): Promise<{ id: string } | { refusal: string }>;
+  stopWatch(id: string): Promise<void>;
+  /** Answer a pending approval. */
+  decide(taskId: string, allow: boolean): Promise<SignalResult>;
+  /** Withdraw the details pre-approved for typing on a site; they are asked for again. */
+  forgetTyping(site: string): Promise<void>;
+  close(): Promise<void>;
+};
+
+function modelsFromEnv(): { models: Models; model: ModelRef | undefined } {
+  const models = createModels();
+  const provider = process.env.MAITRED_MODEL_PROVIDER ?? "anthropic";
+  if (provider === "doubleword" && process.env.DOUBLEWORD_API_KEY) models.setProvider(doublewordProvider());
+  else if (provider === "anthropic" && process.env.ANTHROPIC_API_KEY) models.setProvider(anthropicProvider());
+  else return { models, model: undefined };
+
+  const wanted = process.env.MAITRED_MODEL ?? (provider === "doubleword" ? "zai-org/GLM-5.3" : "claude-opus-5-5");
+  const modelId = models.getModel(provider, wanted)?.id ?? models.getModels(provider)[0]?.id;
+  return { models, model: modelId ? { provider, modelId } : undefined };
 }
 
-export async function bootstrap(): Promise<MaitredHarness> {
-  const context = BACKGROUND_CONTEXT;
+function telegramFromEnv(): TelegramOptions | null {
+  const token = process.env.MAITRED_TELEGRAM_TOKEN;
+  return token ? { token, chatId: process.env.MAITRED_TELEGRAM_CHAT } : null;
+}
 
+function textOf(entry: TypedEntry<never> | undefined): string {
+  const message = entry?.model?.[0];
+  const content = message?.role === "assistant" ? message.content : [];
+  return content.map((block) => (block.type === "text" ? block.text : "")).join("");
+}
+
+export async function bootstrap(options: BootOptions = {}): Promise<Maitred> {
+  const context = BACKGROUND_CONTEXT;
+  const reachable = options.reachable ?? publicHost;
+  const timezone = options.timezone ?? TIMEZONE;
+  const { models, model } = options.models
+    ? { models: options.models, model: options.model }
+    : modelsFromEnv();
+
+  const recipes = createRecipeStore(
+    options.recipeDirs ?? { writable: path.join(STATE_DIR, "recipes"), builtin: BUILTIN_RECIPES_DIR },
+  );
+  const telegramOptions = options.telegram === undefined ? telegramFromEnv() : options.telegram;
+  const telegram = telegramOptions ? createTelegram(telegramOptions) : undefined;
+  const push = (text: string, approvalId?: string) => telegram?.send(text, approvalId) ?? Promise.resolve();
+  const announce = (id: string, ask: { question: string; detail: string }) => push(`${ask.question}\n\n${ask.detail}`, id);
+
+  const browsers = createBrowsers({ reachable });
+  const watchDeps = {
+    allowFor: (hosts: readonly string[]) => listedHosts(hosts, reachable),
+    alert: push,
+    walk: browsers.walk,
+  };
+  const Watch = createWatchTask(watchDeps);
+
+  let harness: Harness | undefined;
+  const stopWatch = async (id: string) => {
+    const taskId = Number(id) as TaskId;
+    if ((await harness!.abortTask(taskId, context)) === "marked") await harness!.waitForTask(taskId, context);
+  };
+
+  const browserTool = createBrowserTool({ browsers, announce });
   const registry = createRegistry();
-  // The recon agent selects the "coding-tools" extension by name; installing
-  // it in the registry is what actually provides bash/read/write/edit.
-  registry.install(CodingTools);
   registry.install(
     defineExtension({
       name: "maitred",
-      tasks: [AirMenusWatch, RecipeWatch, Discover],
+      tools: [
+        createRecipesTool(recipes),
+        createWatchTool({ ...watchDeps, task: Watch, stop: stopWatch }),
+        browserTool,
+      ],
+      sections: [createRecipesSection(recipes)],
+      tasks: [Watch],
+      hooks: [
+        hook(GenerationTask, {
+          afterRun: async (run, api, hookContext) => {
+            await push(textOf(await api.entry(AssistantEntry, run.answer, hookContext)));
+            return undefined;
+          },
+        }),
+      ],
     }),
   );
 
-  // Watch tier: pure code, no model needed. Discovery tier (phase 2) needs a
-  // chat model; provider is env-chosen so the server's .env decides:
-  //   MAITRED_MODEL_PROVIDER=anthropic  (default; ANTHROPIC_API_KEY)
-  //   MAITRED_MODEL_PROVIDER=doubleword (DOUBLEWORD_API_KEY, personal creds)
-  // Without either key the daemon still boots and watches fine; discovery
-  // requests fail at run time with a clear auth error.
-  const models = createModels();
-  const providerChoice = process.env.MAITRED_MODEL_PROVIDER ?? "anthropic";
-  if (providerChoice === "doubleword" && process.env.DOUBLEWORD_API_KEY) {
-    models.setProvider(doublewordProvider());
-  } else if (process.env.ANTHROPIC_API_KEY) {
-    models.setProvider(anthropicProvider());
+  let storage = options.storage;
+  if (!storage) {
+    mkdirSync(STATE_DIR, { recursive: true });
+    storage = await openNodeSqliteStorage(path.join(STATE_DIR, "maitred.sqlite"));
   }
-
-  const storage = await openNodeSqliteStorage(
-    path.join(STATE_DIR, "maitred.sqlite"),
-  );
-
-  const harness = await HarnessImpl.open(
-    storage,
-    {
-      models,
-      registry,
-      // Each conversation gets its own Node execution environment rooted at
-      // the agent's cwd (the recon scratch), so tools run sandboxed to it.
-      env: (target) =>
-        target.cwd
-          ? new NodeExecutionEnv({ cwd: target.cwd, shellEnv: process.env })
-          : undefined,
-    },
+  harness = await HarnessImpl.open(storage, { models, registry }, context);
+  const opened = harness;
+  const root = await opened.root(context);
+  const pushes = telegramOptions?.chatId !== undefined;
+  // The harness leaves thinking off unless told otherwise, and this assistant's work is all judgement.
+  await root.configure(
+    { model: model ?? null, thinkingLevel: "high", instructions: instructions({ pushes }), maxTurns: 80 },
     context,
   );
-  const root = await harness.root(context);
-  harness.resume();
+  opened.resume();
 
-  const hasProvider =
-    (providerChoice === "doubleword" && Boolean(process.env.DOUBLEWORD_API_KEY)) ||
-    (providerChoice !== "doubleword" && Boolean(process.env.ANTHROPIC_API_KEY));
+  const say = (text: string, requestId?: string) =>
+    root.submit(
+      {
+        type: "input",
+        content: `[${localStamp(Date.now(), timezone)}]\n${text}`,
+        entry: { kind: "maitred.user", data: { text } },
+        ...(requestId ? { requestId } : {}),
+      },
+      context,
+    );
+  const decide = (taskId: string, allow: boolean) =>
+    opened.signal(Number(taskId) as TaskId, Approval, DECISION, { allow }, context);
+
+  telegram?.start({
+    onMessage: async (text, id) => {
+      if (model) await say(text, id);
+      else await push("No model is configured, so I cannot answer.");
+    },
+    onDecision: async (id, allow) => {
+      const result = await decide(id, allow);
+      return result === "delivered" ? (allow ? "Approved" : "Declined") : "Already answered";
+    },
+  });
+
   return {
-    harness,
+    harness: opened,
     root,
-    models: hasProvider ? models : undefined,
-    modelProvider: hasProvider ? providerChoice : undefined,
-  };
-}
-
-// Spawn a durable watch. Used by the CLI (phase 1) and the Telegram bot
-// (phase 1.5). The conversation owns the task, so conversation abort
-// cancels the watch subtree.
-export async function startWatch(
-  m: MaitredHarness,
-  input: WatchInput & { pax?: number },
-): Promise<TaskId<WatchResult>> {
-  const context = BACKGROUND_CONTEXT;
-  const watchId = await m.root.commit(
-    async (tx) => {
-      const requests = await tx.doc(Requests);
-      requests[input.requestId] = {
-        restaurant: `airmenus-outlet-${input.outletId}`,
-        pax: input.pax ?? 0,
-        dates: input.dates,
-        times: input.times,
-        status: "watching",
-        createdAt: Date.now(),
-      };
-      return tx.createTask(
-        AirMenusWatch,
-        input,
-        { ownership: { kind: "conversation" } },
-      );
+    model,
+    recipes,
+    stopWatch,
+    say,
+    async answerOf(submission) {
+      const settled = await submission.wait(context);
+      if (settled.status !== "done" || settled.type !== "input") {
+        return { ok: false, reason: settled.status === "unanswered" ? settled.reason : settled.status };
+      }
+      return { ok: true, text: textOf(await root.commit((tx) => tx.entry(AssistantEntry, settled.answer), context)) };
     },
-    context,
-  );
-  // tx.createTask() resolves to the TaskId only after the commit returns
-  // (inside the tx it is a Promise). Stamp it for the UI via a tiny second
-  // commit — the doc is the request->task map the web/telegram tiers use.
-  await m.root.commit(async (tx) => {
-    const requests = await tx.doc(Requests);
-    if (requests[input.requestId]) {
-      requests[input.requestId].taskId = String(watchId);
-    }
-  }, context);
-  return watchId;
-}
-
-// Terminal result of a watch, for notification.
-export async function watchOutcome(
-  m: MaitredHarness,
-  taskId: TaskId<WatchResult>,
-): Promise<WatchResult> {
-  const context = BACKGROUND_CONTEXT;
-  const settled = await m.harness.waitForTask(taskId, context);
-  const outcome = settled.state.outcome;
-  return outcome.status === "completed"
-    ? (outcome.result as WatchResult)
-    : { found: false, reason: `outcome ${outcome.status}` };
+    async startWatch(spec, proof) {
+      const now = Date.now();
+      const refused = await vetWatch(spec, proof, now, watchDeps);
+      if (refused) return { refusal: refused.refusal };
+      const id = String(await root.commit((tx) => tx.createTask(Watch, spec, WATCH_TASK_OPTIONS), context));
+      await root.commit((tx) => listNewWatch(tx, id, spec, now), context);
+      return { id };
+    },
+    decide,
+    async forgetTyping(site) {
+      await opened.commit(async (tx) => {
+        delete (await tx.doc(TypingAllowances)).sites[site];
+      }, context);
+    },
+    async close() {
+      await telegram?.stop();
+      await opened.close(context);
+      await browsers.closeAll();
+    },
+  };
 }

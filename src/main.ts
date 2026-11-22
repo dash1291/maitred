@@ -1,115 +1,48 @@
-// maitred CLI entry. Phase 1: local test drive — start a Guerilla watch,
-// print the durable polling loop, verify crash-resume by restarting the
-// process against the same SQLite state.
+// maitred CLI: a client of the running daemon (src/web.ts). It never opens the database itself, so it cannot
+// contend with the daemon for it.
+//
+//   main.ts say <message...>      send a message and print the answer
+//   main.ts watch <file.json>     start a watch without the model; the file is { "spec": {...}, "proof": {...} }
+//   main.ts stop <watchId>
+//   main.ts approve|decline <requestId>
+//   main.ts state
 
-import { bootstrap, startWatch } from "./harness.ts";
-import { fetchRestaurant } from "./connectors/airmenus.ts";
-import { watchTaskGraph } from "./print.ts";
-import { startFromMessage, confirmRecipe } from "./request.ts";
-import { loadRecipe, listRecipeNames } from "./recipes.ts";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { STATE_DIR } from "./config.ts";
 
-const args = process.argv.slice(2);
-const command = args[0] ?? "watch";
+const BASE = process.env.MAITRED_URL ?? `http://127.0.0.1:${process.env.MAITRED_WEB_PORT ?? 8681}`;
+const token = process.env.MAITRED_TOKEN ?? readFileSync(path.join(STATE_DIR, "webtoken"), "utf8").trim();
 
-async function nextWeekend(): Promise<string[]> {
-  const out: string[] = [];
-  const d = new Date();
-  for (let i = 0; i < 14; i++) {
-    const day = d.getDay();
-    if (day === 5 || day === 6 || day === 0) out.push(d.toISOString().slice(0, 10));
-    d.setDate(d.getDate() + 1);
-  }
-  return [...new Set(out)];
-}
-
-async function main() {
-  const m = await bootstrap();
-  console.log(`[maitred] harness open, resume()d`);
-
-  // Production mode: headless. The daemon owns nothing and creates nothing —
-  // it only resumes durable tasks from SQLite (watch tasks survive restarts
-  // by design) and waits. New watches arrive via the Telegram bridge / CLI.
-  // Used by the Docker container.
-  if (command === "daemon") {
-    console.log(`[maitred] daemon mode: resuming durable tasks, waiting`);
-    await daemon(m);
-    return;
-  }
-
-  if (command === "message") {
-    const message = args.slice(1).join(" ") || 'table for 2 at "Guerilla Diner" saturday dinner';
-    console.log(`[maitred] message: ${message}`);
-    const r = await startFromMessage(m, message);
-    if (r.route === "rejected") {
-      console.error(`[maitred] rejected: ${r.error}`);
-      process.exit(1);
-    }
-    console.log(`[maitred] routed=${r.route} requestId=${r.requestId} task=${r.taskId}${r.recipeName ? ` recipe=${r.recipeName}` : ""}`);
-    await watchTaskGraph(m);
-    return;
-  }
-
-  if (command === "confirm") {
-    const requestId = args[1];
-    const approve = (args[2] ?? "yes") !== "no";
-    if (!requestId) {
-      console.error("usage: confirm <requestId> [yes|no]");
-      process.exit(1);
-    }
-    const res = await confirmRecipe(m, requestId, approve);
-    console.log(`[maitred] confirm(${approve}) ${requestId} -> ${res}`);
-    return;
-  }
-
-  if (command === "recipes") {
-    const names = await listRecipeNames();
-    for (const n of names) {
-      const r = await loadRecipe(n);
-      if (!r) continue;
-      console.log(`[maitred] ${r.name}: platform=${r.restaurant.platformId} ids=${JSON.stringify(r.restaurant.ids)}`);
-    }
-    if (!names.length) console.log("[maitred] no recipes known");
-    return;
-  }
-
-  if (command === "watch") {
-    const restaurant = args[1] ?? "guerilladiner";
-    const rest = await fetchRestaurant(restaurant);
-    const outletId = rest.outlets[0]!.id;
-    console.log(`[maitred] ${rest.name}: outlet ${outletId}`);
-
-    const dates = await nextWeekend();
-    const giveUp = Date.now() + 6 * 60 * 60 * 1000; // 6h from now
-    const id = await startWatch(m, {
-      requestId: `req-${Date.now()}`,
-      outletId,
-      dates,
-      times: ["19:00", "20:00"],
-      pollSeconds: 4,
-      giveUpAt: giveUp,
-    });
-    console.log(`[maitred] watch task ${String(id)} started; ctrl-c / kill -9 to test resume`);
-
-    void watchTaskGraph(m, Number(id));
-  }
-}
-
-// Block "forever": pi-durable holds no thread for sleeping tasks; without
-// this the process would see an empty runloop and exit.
-function daemon(m: Awaited<ReturnType<typeof bootstrap>>) {
-  return new Promise<never>((_, reject) => {
-    process.on("SIGTERM", () => {
-      console.log(`[maitred] SIGTERM: exiting (durable state is already committed)`);
-      process.exit(0);
-    });
-    process.on("uncaughtException", reject);
-    setInterval(() => {
-      // keep the run loop alive
-    }, 1 << 30);
+async function api(pathname: string, body?: unknown): Promise<unknown> {
+  const res = await fetch(`${BASE}${pathname}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "x-maitred-token": token, "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
+  const value = await res.json();
+  if (!res.ok) {
+    console.error(JSON.stringify(value, null, 2));
+    process.exit(1);
+  }
+  return value;
 }
 
-main().catch((e) => {
-  console.error("[maitred] fatal:", e);
+const [command, ...rest] = process.argv.slice(2);
+const print = (value: unknown) => console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
+
+if (command === "say" && rest.length > 0) {
+  const answer = (await api("/api/message", { text: rest.join(" "), wait: true })) as { ok: boolean; text?: string; reason?: string };
+  print(answer.ok ? answer.text : `no answer: ${answer.reason}`);
+} else if (command === "watch" && rest[0]) {
+  print(await api("/api/watch", JSON.parse(readFileSync(rest[0], "utf8"))));
+} else if (command === "stop" && rest[0]) {
+  print(await api("/api/watch/stop", { id: rest[0] }));
+} else if ((command === "approve" || command === "decline") && rest[0]) {
+  print(await api("/api/decide", { id: rest[0], allow: command === "approve" }));
+} else if (command === "state") {
+  print(await api("/api/state"));
+} else {
+  console.error("usage: main.ts say <message> | watch <file.json> | stop <id> | approve <id> | decline <id> | state");
   process.exit(1);
-});
+}

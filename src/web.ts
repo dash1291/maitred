@@ -1,172 +1,126 @@
-// maitred web console: loopback-only, used through an ssh -L tunnel.
-// Zero deps (node:http). UI polls /api/state every 2s. Loose token auth:
-// every /api request must carry state/webtoken (random hex, generated once,
-// lives next to the SQLite db so it survives container rebuilds).
+// maitred daemon and console. Loopback only; reached through an ssh tunnel. Every /api request carries the token
+// in state/webtoken. This is the one process that opens the harness: the CLI (main.ts) talks to it over HTTP.
 
-import http from "node:http";
-import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import http from "node:http";
 import path from "node:path";
-import { bootstrap, startWatch } from "./harness.ts";
-import { fetchRestaurant } from "./connectors/airmenus.ts";
-import { startFromMessage, confirmRecipe } from "./request.ts";
-import { loadRecipe, listRecipeNames } from "./recipes.ts";
-import { Requests } from "./docs.ts";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { TaskId } from "@earendil-works/pi-durable";
-import type { WatchResult } from "./tasks/watch.ts";
+import { AssistantEntry, LiveDoc, type EntryRecord } from "@earendil-works/pi-durable";
+import { STATE_DIR } from "./config.ts";
+import { bootstrap } from "./harness.ts";
+import { PendingApprovals, TypingAllowances } from "./approval.ts";
+import { WatchList, type WatchProof, type WatchSpec } from "./watch.ts";
 
 const PORT = Number(process.env.MAITRED_WEB_PORT ?? 8681);
-// In Docker, published ports arrive via the container's eth interface, so we
-// must bind 0.0.0.0 there; the host-level exposure is still loopback-only
-// (compose maps 127.0.0.1:8681 -> container). Bare-metal default stays loopback.
 const BIND = process.env.MAITRED_WEB_BIND ?? "127.0.0.1";
-const STATE_DIR = path.resolve(process.cwd(), "state");
 const HTML = readFileSync(path.resolve(import.meta.dirname, "webui.html"), "utf8");
+const context = BACKGROUND_CONTEXT;
 
 function loadToken(): string {
-  const tokPath = path.join(STATE_DIR, "webtoken");
-  if (!existsSync(tokPath)) {
-    const t = randomBytes(24).toString("hex");
-    writeFileSync(tokPath, t, { mode: 0o600 });
-    return t;
-  }
-  return readFileSync(tokPath, "utf8").trim();
+  mkdirSync(STATE_DIR, { recursive: true });
+  const file = path.join(STATE_DIR, "webtoken");
+  if (!existsSync(file)) writeFileSync(file, randomBytes(24).toString("hex"), { mode: 0o600 });
+  return readFileSync(file, "utf8").trim();
 }
 
+const token = loadToken();
 const m = await bootstrap();
-const bootToken = loadToken(); // eagerly create state/webtoken on boot
-void bootToken;
 
-// One live value of the task graph (used for state polls; cheap).
-interface GraphTask {
-  id: number;
-  kind: string;
-  state: { status: string; until?: number };
-}
-async function graphOnce(): Promise<Record<string, number>> {
-  const context = BACKGROUND_CONTEXT;
-  const g = await m.harness.watchTaskGraph(context);
-  return new Promise((resolve) => {
-    void g.start(async (call) => {
-      if (call.kind === "value") {
-        const tasks = (call.value.tasks ?? {}) as Record<string, GraphTask>;
-        const out: Record<string, number> = {};
-        for (const t of Object.values(tasks)) out[String(t.id)] = t.state.status === "terminal" ? 2 : 1;
-        resolve(out);
-        void g.stop();
-      }
-    });
+type Line = { who: "you" | "maitred" | "tool" | "watch"; text: string };
+
+function linesOf(entry: EntryRecord): Line[] {
+  const data = entry.data as { text?: string } | undefined;
+  if (entry.kind === "maitred.user") return [{ who: "you", text: data?.text ?? "" }];
+  if (entry.kind === "maitred.watch") return [{ who: "watch", text: data?.text ?? "" }];
+  if (!AssistantEntry.is(entry)) return [];
+  const message = entry.model?.[0];
+  if (message?.role !== "assistant") return [];
+  return message.content.flatMap((block): Line[] => {
+    if (block.type === "text" && block.text.trim()) return [{ who: "maitred", text: block.text }];
+    if (block.type === "toolCall") return [{ who: "tool", text: block.name }];
+    return [];
   });
 }
 
-async function readBody(req: http.IncomingMessage): Promise<string> {
+async function state() {
+  const page = await m.root.entries({ order: "descending" }, 60, undefined, context);
+  const live = await m.harness.snapshot(LiveDoc, m.root.id, context);
+  return {
+    model: m.model ? `${m.model.provider}/${m.model.modelId}` : null,
+    busy: live?.run !== undefined,
+    failure: live?.runFailure ? `${live.runFailure.reason}` : null,
+    transcript: [...page.items].reverse().flatMap(linesOf),
+    watches: (await m.harness.snapshot(WatchList, context))?.items ?? {},
+    pending: (await m.harness.snapshot(PendingApprovals, context))?.items ?? {},
+    typing: Object.fromEntries(
+      Object.entries((await m.harness.snapshot(TypingAllowances, context))?.sites ?? {}).map(([site, values]) => [
+        site,
+        values.map((v) => v.label),
+      ]),
+    ),
+    recipes: await m.recipes.list(),
+  };
+}
+
+function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", (c) => (data += c));
+    req.on("data", (chunk) => (data += chunk));
     req.on("end", () => resolve(data));
     req.on("error", reject);
   });
 }
 
-interface WatchPost {
-  recipe: string;
-  dates: string[];
-  times: string[];
-  pax: number;
-}
-
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
-  const token = loadToken();
-  const json = (o: unknown, code = 200) => {
+  const json = (value: unknown, code = 200) => {
     res.writeHead(code, { "content-type": "application/json" });
-    res.end(JSON.stringify(o));
+    res.end(JSON.stringify(value));
   };
-
   try {
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      const html = HTML.replace("__MAITRED_TOKEN__", token);
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      return void res.end(html);
+      return void res.end(HTML.replace("__MAITRED_TOKEN__", token));
     }
-
     if (!url.pathname.startsWith("/api/")) return void json({ error: "not found" }, 404);
-    const hdr = req.headers["x-maitred-token"];
-    if (hdr !== token) return void json({ error: "bad token" }, 401);
+    if (req.headers["x-maitred-token"] !== token) return void json({ error: "bad token" }, 401);
 
-    const context = BACKGROUND_CONTEXT;
+    if (url.pathname === "/api/state" && req.method === "GET") return void json(await state());
 
-    if (url.pathname === "/api/state" && req.method === "GET") {
-      const requests = await m.harness.snapshot(Requests, context);
-      const alive = await graphOnce();
-      const recipes = await listRecipeNames();
-      return void json({ requests: requests ?? {}, alive, recipes, status: "ok", pollSeconds: 4 });
+    if (req.method !== "POST") return void json({ error: "not found" }, 404);
+    const body = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+
+    if (url.pathname === "/api/message") {
+      if (typeof body.text !== "string" || !body.text.trim()) return void json({ error: "text required" }, 400);
+      if (!m.model) return void json({ error: "no model configured: set MAITRED_MODEL_PROVIDER and its API key" }, 503);
+      const submission = await m.say(body.text);
+      if (body.wait !== true) return void json({ ok: true });
+      return void json(await m.answerOf(submission));
     }
 
-    if (url.pathname === "/api/message" && req.method === "POST") {
-      const body = JSON.parse(await readBody(req)) as { text?: string };
-      if (!body.text?.trim()) return void json({ error: "text required" }, 400);
-      const result = await startFromMessage(m, body.text);
-      return void json(result, result.route === "rejected" ? 400 : 200);
+    if (url.pathname === "/api/watch") {
+      const result = await m.startWatch(body.spec as WatchSpec, body.proof as WatchProof);
+      return void json(result, "id" in result ? 200 : 400);
     }
 
-    if (url.pathname === "/api/confirm" && req.method === "POST") {
-      const body = JSON.parse(await readBody(req)) as { requestId?: string; approve?: boolean };
-      if (!body.requestId || typeof body.approve !== "boolean") {
-        return void json({ error: "requestId and approve required" }, 400);
+    if (url.pathname === "/api/watch/stop") {
+      if (typeof body.id !== "string") return void json({ error: "id required" }, 400);
+      await m.stopWatch(body.id);
+      return void json({ ok: true });
+    }
+
+    if (url.pathname === "/api/decide") {
+      if (typeof body.id !== "string" || typeof body.allow !== "boolean") {
+        return void json({ error: "id and allow required" }, 400);
       }
-      const result = await confirmRecipe(m, body.requestId, body.approve);
-      return void json({ result }, result === "delivered" ? 200 : 400);
+      const result = await m.decide(body.id, body.allow);
+      return void json({ result }, result === "delivered" ? 200 : 409);
     }
 
-    if (url.pathname === "/api/recipes" && req.method === "GET") {
-      const names = await listRecipeNames();
-      const recipes = await Promise.all(
-        names.map(async (n) => {
-          const r = await loadRecipe(n);
-          return r ? { name: r.name, platform: r.restaurant.platformId } : null;
-        }),
-      );
-      return void json({ recipes: recipes.filter((r) => r !== null) });
-    }
-
-    if (url.pathname === "/api/watch" && req.method === "POST") {
-      const body = JSON.parse(await readBody(req)) as WatchPost;
-      if (!body.dates?.length || !body.times?.length || !body.pax) {
-        return void json({ error: "dates, times, pax all required" }, 400);
-      }
-      const rest = await fetchRestaurant(body.recipe);
-      const outletId = rest.outlets[0]!.id;
-      const requestId = "req-" + Date.now();
-      const taskId: TaskId<WatchResult> = await startWatch(m, {
-        requestId,
-        outletId,
-        dates: body.dates,
-        times: body.times,
-        pax: body.pax,
-        pollSeconds: 4,
-        giveUpAt: Date.now() + 6 * 60 * 60 * 1000,
-      });
-      return void json({ ok: true, requestId, taskId: String(taskId) });
-    }
-
-    if (url.pathname === "/api/cancel" && req.method === "POST") {
-      const body = JSON.parse(await readBody(req)) as { id: string };
-      const requests = await m.harness.snapshot(Requests, context);
-      const req2 = (requests as Record<string, { taskId?: string; status: string }>)?.[body.id];
-      if (!req2) return void json({ error: "unknown request" }, 404);
-      if (req2.taskId) {
-        const tid = Number(req2.taskId);
-        // live graph check: only abort if the task exists and isn't terminal
-        const res2 = await m.harness.abortTask(tid as TaskId<WatchResult>, context);
-        void res2; // "marked" | "terminal"; either is what we want
-      }
-      // one more commit to mark the request cancelled in the doc
-      await m.root.commit(async (tx) => {
-        const all = await tx.doc(Requests);
-        if (all[body.id]) all[body.id].status = "cancelled";
-      }, context);
+    if (url.pathname === "/api/typing/forget") {
+      if (typeof body.site !== "string") return void json({ error: "site required" }, 400);
+      await m.forgetTyping(body.site);
       return void json({ ok: true });
     }
 
@@ -177,8 +131,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, BIND, () => {
-  console.log("[maitred] web console at http://" + BIND + ":" + PORT + " (token: state/webtoken)");
+  console.log(`[maitred] console at http://${BIND}:${PORT} (token in state/webtoken), model ${m.model?.modelId ?? "none"}`);
 });
 
-// keep alive alongside the durable scheduler
-setInterval(() => {}, 1 << 30);
+process.on("SIGTERM", () => {
+  server.close();
+  void m.close().finally(() => process.exit(0));
+});
