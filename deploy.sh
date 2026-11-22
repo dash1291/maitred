@@ -6,9 +6,11 @@
 # docker group, which the script checks for and prints instructions.
 set -euo pipefail
 
-HOST="${MAITRED_HOST:-dev@server.example}"
+# The server to deploy to, as user@host: set MAITRED_HOST, or put that line in deploy.local (gitignored).
+[ -f deploy.local ] && . ./deploy.local
+HOST="${MAITRED_HOST:?set MAITRED_HOST=user@host, in the environment or in deploy.local}"
 DEST_DIR="\$HOME/maitred"
-SERVER_NAME="server"
+SERVER_NAME="${HOST#*@}"
 
 say() { printf '\033[1;34m[deploy]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[deploy]\033[0m %s\n' "$*" >&2; exit 1; }
