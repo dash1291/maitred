@@ -72,7 +72,7 @@ export function tempDir(): string {
 
 /** A maitred whose model is scripted: `say` each reply the model should give, in order. */
 export async function scripted(
-  options: { storage?: Storage; dir?: string; reachable?: HostPolicy; telegram?: TelegramOptions } = {},
+  options: { storage?: Storage; dir?: string; reachable?: HostPolicy; telegram?: TelegramOptions; timezone?: string } = {},
 ) {
   const dir = options.dir ?? tempDir();
   const faux = fauxProvider();
@@ -85,7 +85,7 @@ export async function scripted(
     model: { provider: model.provider, modelId: model.id },
     recipeDirs: { writable: path.join(dir, "recipes"), builtin: path.join(dir, "builtin") },
     reachable: options.reachable ?? anyHost,
-    timezone: "Asia/Kolkata",
+    timezone: options.timezone ?? "Asia/Kolkata",
     telegram: options.telegram ?? null,
   });
   return {

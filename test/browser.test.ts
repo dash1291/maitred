@@ -259,3 +259,20 @@ test("a page cannot make the browser fetch from a host that is not reachable", a
     await hidden.close();
   }
 });
+
+test("a page sees the person's timezone, not the one the server runs in", async () => {
+  const clock = await site(() => ({
+    html: `<!doctype html><title>Clock</title><p id="zone"></p>
+<script>document.getElementById("zone").innerText = "Zone: " + Intl.DateTimeFormat().resolvedOptions().timeZone;</script>`,
+  }));
+  const { m, modelCalls, modelSays } = await scripted({ timezone: "Pacific/Auckland" });
+  try {
+    modelCalls("browser", { action: "open", url: clock.url });
+    modelSays("Seen.");
+    assert.equal((await m.answerOf(await m.say("what time does the page think it is"))).ok, true);
+    assert.match((await results(m))[0], /Zone: Pacific\/Auckland/);
+  } finally {
+    await m.close();
+    await clock.close();
+  }
+});

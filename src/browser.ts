@@ -100,13 +100,18 @@ const LIST_CONTROLS = `((max) => {
   return { controls, more, text: document.body ? document.body.innerText : "" };
 })`;
 
-export function createBrowsers(deps: { reachable: HostPolicy; launch?: () => Promise<Browser> }) {
+export function createBrowsers(deps: { reachable: HostPolicy; timezone: string; launch?: () => Promise<Browser> }) {
   const launch = deps.launch ?? (async () => (await import("playwright")).chromium.launch({ headless: true }));
   const live = new Set<BrowserSession>();
 
   const open = async (): Promise<BrowserSession> => {
     const browser = await launch();
-    const context = await browser.newContext({ acceptDownloads: false, serviceWorkers: "block" });
+    // A booking page works out its dates from the browser's clock, and shows none when that is in another zone.
+    const context = await browser.newContext({
+      acceptDownloads: false,
+      serviceWorkers: "block",
+      timezoneId: deps.timezone,
+    });
     let page = await context.newPage();
     let seen: SeenRequest[] = [];
 

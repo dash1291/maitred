@@ -104,7 +104,7 @@ export async function bootstrap(options: BootOptions = {}): Promise<Maitred> {
   const push = (text: string, approvalId?: string) => telegram?.send(text, approvalId) ?? Promise.resolve();
   const announce = (id: string, ask: { question: string; detail: string }) => push(`${ask.question}\n\n${ask.detail}`, id);
 
-  const browsers = createBrowsers({ reachable });
+  const browsers = createBrowsers({ reachable, timezone });
   const watchDeps = {
     allowFor: (hosts: readonly string[]) => listedHosts(hosts, reachable),
     alert: push,
