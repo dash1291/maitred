@@ -78,7 +78,7 @@ function modelsFromEnv(): { models: Models; model: ModelRef | undefined } {
   else if (provider === "anthropic" && process.env.ANTHROPIC_API_KEY) models.setProvider(anthropicProvider());
   else return { models, model: undefined };
 
-  const wanted = process.env.MAITRED_MODEL ?? (provider === "doubleword" ? "zai-org/GLM-5.3" : "claude-opus-5-5");
+  const wanted = process.env.MAITRED_MODEL ?? (provider === "doubleword" ? "zai-org/GLM-5.3" : "claude-sonnet-5-5");
   const modelId = models.getModel(provider, wanted)?.id ?? models.getModels(provider)[0]?.id;
   return { models, model: modelId ? { provider, modelId } : undefined };
 }

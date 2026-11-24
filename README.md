@@ -76,7 +76,7 @@ Read from the environment; `npm start` also loads `.env` if present.
 | Variable | Meaning | Default |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | key for the default provider | none |
-| `MAITRED_MODEL` | model the assistant runs on | `claude-opus-5-5` |
+| `MAITRED_MODEL` | model the assistant runs on | `claude-sonnet-5-5` |
 | `MAITRED_MODEL_PROVIDER` | `anthropic` or `doubleword` (needs `DOUBLEWORD_API_KEY`) | `anthropic` |
 | `MAITRED_TELEGRAM_TOKEN` | bot token from @BotFather; enables Telegram | none |
 | `MAITRED_TELEGRAM_CHAT` | the one chat allowed to talk to the assistant | none |

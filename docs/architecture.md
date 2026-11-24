@@ -26,7 +26,7 @@ submitted to it; the final answer of every run is sent back to them.
 Each input is prefixed with the person's local time. It goes in the message,
 not the system prompt, so the prompt cache stays warm.
 
-It runs on Claude Opus 5.5 with thinking set to high (`MAITRED_MODEL`
+It runs on Claude Sonnet 5.5 with thinking set to high (`MAITRED_MODEL`
 overrides the model). The harness leaves thinking off unless told otherwise;
 the first versions ran that way without anyone noticing.
 
