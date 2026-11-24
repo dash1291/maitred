@@ -45,6 +45,12 @@ export type BootOptions = {
   telegram?: TelegramOptions | null;
 };
 
+/**
+ * Every model call re-sends the whole conversation. Past this size the older part is replaced by a summary; recipes and
+ * the watch list hold what has to last.
+ */
+export const CONVERSATION_TOKENS = 50_000;
+
 export type Answer = { ok: true; text: string } | { ok: false; reason: string };
 
 export type Maitred = {
@@ -150,9 +156,13 @@ export async function bootstrap(options: BootOptions = {}): Promise<Maitred> {
   const opened = harness;
   const root = await opened.root(context);
   const pushes = telegramOptions?.chatId !== undefined;
+  // The harness states its summary threshold as the model's window less a reserve, which a large window never reaches.
+  const window = (model && models.getModel(model.provider, model.modelId)?.contextWindow) || 0;
+  const compaction =
+    window > CONVERSATION_TOKENS ? { reserveTokens: window - CONVERSATION_TOKENS, backgroundTokens: 0 } : null;
   // The harness leaves thinking off unless told otherwise, and this assistant's work is all judgement.
   await root.configure(
-    { model: model ?? null, thinkingLevel: "high", instructions: instructions({ pushes }), maxTurns: 80 },
+    { model: model ?? null, thinkingLevel: "high", instructions: instructions({ pushes }), maxTurns: 80, compaction },
     context,
   );
   opened.resume();

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ToolResultEntry } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import type { Maitred } from "../src/harness.ts";
+import { CONVERSATION_TOKENS, type Maitred } from "../src/harness.ts";
 import { WatchList } from "../src/watch.ts";
 import { scripted, site, tempDir, until } from "./helpers.ts";
 
@@ -139,5 +139,30 @@ test("a watch the model starts through its tool survives a restart and still rep
   } finally {
     await second.m.close();
     await venue.close();
+  }
+});
+
+async function summaries(m: Maitred): Promise<number> {
+  const page = await m.root.entries({ order: "ascending" }, 100, undefined, context);
+  return page.items.filter((e) => e.kind === "pi.compaction").length;
+}
+
+test("a conversation that has grown past its limit is summarised before the next reply", async () => {
+  const { m, modelSays } = await scripted();
+  try {
+    // A fifth of the limit, at about four characters a token.
+    const long = "x".repeat((CONVERSATION_TOKENS / 5) * 4);
+    for (let turn = 1; turn <= 4; turn++) {
+      modelSays(`Reply ${turn}.`);
+      assert.equal((await m.answerOf(await m.say(long))).ok, true);
+    }
+    assert.equal(await summaries(m), 0);
+
+    modelSays("What happened so far.");
+    modelSays("Reply 5.");
+    assert.deepEqual(await m.answerOf(await m.say(long)), { ok: true, text: "Reply 5." });
+    assert.equal(await summaries(m), 1);
+  } finally {
+    await m.close();
   }
 });
